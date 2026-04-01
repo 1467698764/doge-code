@@ -131,6 +131,8 @@ export function convertAnthropicRequestToOpenAI(input: {
   temperature?: number
   max_tokens?: number
 }): OpenAIChatRequest {
+  const configuredModel = process.env.ANTHROPIC_MODEL?.trim()
+  const targetModel = configuredModel || input.model
   const messages: OpenAIChatMessage[] = []
 
   if (input.system) {
@@ -195,7 +197,7 @@ export function convertAnthropicRequestToOpenAI(input: {
   }
 
   return {
-    model: input.model,
+    model: targetModel,
     messages,
     temperature: input.temperature,
     max_tokens: input.max_tokens,
@@ -235,7 +237,15 @@ export async function createOpenAICompatStream(
   )
 
   if (!response.ok || !response.body) {
-    throw new Error(`OpenAI compatible request failed with status ${response.status}`)
+    let responseText = ''
+    try {
+      responseText = await response.text()
+    } catch {
+      responseText = ''
+    }
+    throw new Error(
+      `OpenAI compatible request failed with status ${response.status}${responseText ? `: ${responseText}` : ''}`,
+    )
   }
 
   return response.body.getReader()
@@ -262,10 +272,12 @@ export async function* createAnthropicStreamFromOpenAI(input: {
   let buffer = ''
   let started = false
   let textStarted = false
+  let textContentIndex: number | null = null
   let toolIndexByOpenAIIndex = new Map<number, number>()
   let nextContentIndex = 0
   let promptTokens = 0
   let completionTokens = 0
+  let emittedAnyContent = false
   const toolCallState = new Map<number, { id: string; name: string; arguments: string }>()
 
   while (true) {
@@ -284,8 +296,19 @@ export async function* createAnthropicStreamFromOpenAI(input: {
       for (const data of dataLines) {
         if (!data || data === '[DONE]') continue
         const chunk = JSON.parse(data) as OpenAIStreamChunk
+        if (!chunk || typeof chunk !== 'object') {
+          throw new Error(
+            `[openaiCompat] invalid stream chunk: ${String(data).slice(0, 500)}`,
+          )
+        }
         const choice = chunk.choices?.[0]
         const delta = choice?.delta
+
+        if (!choice && data !== '[DONE]') {
+          throw new Error(
+            `[openaiCompat] chunk missing choices[0]: ${JSON.stringify(chunk).slice(0, 1000)}`,
+          )
+        }
 
         if (!started) {
           started = true
@@ -311,9 +334,10 @@ export async function* createAnthropicStreamFromOpenAI(input: {
         if (delta?.content) {
           if (!textStarted) {
             textStarted = true
+            textContentIndex = nextContentIndex
             yield {
               type: 'content_block_start',
-              index: nextContentIndex,
+              index: textContentIndex,
               content_block: {
                 type: 'text',
                 text: '',
@@ -323,12 +347,13 @@ export async function* createAnthropicStreamFromOpenAI(input: {
 
           yield {
             type: 'content_block_delta',
-            index: nextContentIndex,
+            index: textContentIndex ?? 0,
             delta: {
               type: 'text_delta',
               text: delta.content,
             },
           } as BetaRawMessageStreamEvent
+          emittedAnyContent = true
         }
 
         for (const toolCall of delta?.tool_calls ?? []) {
@@ -370,15 +395,30 @@ export async function* createAnthropicStreamFromOpenAI(input: {
                 partial_json: toolCall.function.arguments,
               },
             } as BetaRawMessageStreamEvent
+            emittedAnyContent = true
           }
         }
 
         if (choice?.finish_reason) {
-          completionTokens = chunk.usage?.completion_tokens ?? completionTokens
-          if (textStarted) {
+          if (!emittedAnyContent) {
+            yield {
+              type: 'content_block_start',
+              index: 0,
+              content_block: {
+                type: 'text',
+                text: '',
+              },
+            } as BetaRawMessageStreamEvent
             yield {
               type: 'content_block_stop',
               index: 0,
+            } as BetaRawMessageStreamEvent
+          }
+          completionTokens = chunk.usage?.completion_tokens ?? completionTokens
+          if (textStarted && textContentIndex !== null) {
+            yield {
+              type: 'content_block_stop',
+              index: textContentIndex,
             } as BetaRawMessageStreamEvent
           }
 
@@ -422,7 +462,9 @@ export async function* createAnthropicStreamFromOpenAI(input: {
     }
   }
 
-  throw new Error('OpenAI compatible stream ended unexpectedly')
+  throw new Error(
+    `[openaiCompat] stream ended unexpectedly before message_stop for model=${input.model}`,
+  )
 }
 
 export function mapOpenAIUsageToAnthropic(usage?: {

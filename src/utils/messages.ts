@@ -2947,6 +2947,11 @@ export function handleMessageFromStream(
   onApiMetrics?: (metrics: { ttftMs: number }) => void,
   onStreamingText?: (f: (current: string | null) => string | null) => void,
 ): void {
+  if (!message || typeof message !== 'object' || !('type' in message)) {
+    onStreamingText?.(() => null)
+    return
+  }
+
   if (
     message.type !== 'stream_event' &&
     message.type !== 'stream_request_start'

@@ -1836,6 +1836,11 @@ async function* queryModel(
             temperature: params.temperature,
             max_tokens: params.max_tokens,
           })
+          if (!openAIRequest.messages || openAIRequest.messages.length === 0) {
+            throw new Error(
+              `[claude.ts] openai compat request has no messages; source=${options.querySource} model=${params.model}`,
+            )
+          }
           const reader = await createOpenAICompatStream(
             {
               apiKey: process.env.DOGE_API_KEY || '',
@@ -1885,11 +1890,22 @@ async function* queryModel(
     do {
       e = await generator.next()
 
+      if (e && !e.done && e.value === undefined) {
+        throw new Error(
+          `[claude.ts] retry generator yielded undefined before stream acquisition; source=${options.querySource}`,
+        )
+      }
+
       // yield API error messages (the stream has a 'controller' property, error messages don't)
       if (!('controller' in e.value)) {
         yield e.value
       }
     } while (!e.done)
+    if (!e || !e.value) {
+      throw new Error(
+        `[claude.ts] retry generator completed without stream value; source=${options.querySource}`,
+      )
+    }
     stream = e.value as Stream<BetaRawMessageStreamEvent>
 
     // reset state
@@ -1974,6 +1990,11 @@ async function* queryModel(
       let stallCount = 0
 
       for await (const part of stream) {
+        if (!part) {
+          throw new Error(
+            `[claude.ts] stream yielded undefined part; compatProvider=${readCustomApiStorage().provider ?? 'anthropic'} model=${options.model}`,
+          )
+        }
         resetStreamIdleTimer()
         const now = Date.now()
 

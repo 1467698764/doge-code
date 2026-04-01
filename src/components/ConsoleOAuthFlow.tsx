@@ -94,6 +94,9 @@ export function ConsoleOAuthFlow({
       state: 'provider_select'
     };
   });
+  const safeOauthStatus = oauthStatus ?? {
+    state: 'provider_select' as const
+  };
   const [compatibleApiProvider, setCompatibleApiProvider] = useState<CompatibleApiProvider>(persistedProvider);
   const [pastedCode, setPastedCode] = useState('');
   const [cursorOffset, setCursorOffset] = useState(0);
@@ -133,11 +136,11 @@ export function ConsoleOAuthFlow({
 
   // Retry logic
   useEffect(() => {
-    if (oauthStatus.state === 'about_to_retry') {
-      const timer = setTimeout(setOAuthStatus, 1000, oauthStatus.nextState);
+    if (safeOauthStatus.state === 'about_to_retry') {
+      const timer = setTimeout(setOAuthStatus, 1000, safeOauthStatus.nextState);
       return () => clearTimeout(timer);
     }
-  }, [oauthStatus]);
+  }, [safeOauthStatus]);
 
   // Handle Enter to continue on success state
   useKeybinding('confirm:yes', () => {
@@ -147,7 +150,7 @@ export function ConsoleOAuthFlow({
     onDone();
   }, {
     context: 'Confirmation',
-    isActive: oauthStatus.state === 'success' && mode !== 'setup-token'
+    isActive: safeOauthStatus.state === 'success' && mode !== 'setup-token'
   });
 
   // Handle Enter to continue from platform setup
@@ -157,32 +160,32 @@ export function ConsoleOAuthFlow({
     });
   }, {
     context: 'Confirmation',
-    isActive: oauthStatus.state === 'platform_setup'
+    isActive: safeOauthStatus.state === 'platform_setup'
   });
 
   // Handle Enter to retry on error state
   useKeybinding('confirm:yes', () => {
-    if (oauthStatus.state === 'error' && oauthStatus.toRetry) {
+    if (safeOauthStatus.state === 'error' && safeOauthStatus.toRetry) {
       setPastedCode('');
       setOAuthStatus({
         state: 'about_to_retry',
-        nextState: oauthStatus.toRetry
+        nextState: safeOauthStatus.toRetry
       });
     }
   }, {
     context: 'Confirmation',
-    isActive: oauthStatus.state === 'error' && !!oauthStatus.toRetry
+    isActive: safeOauthStatus.state === 'error' && !!safeOauthStatus.toRetry
   });
   useEffect(() => {
-    if (pastedCode === 'c' && oauthStatus.state === 'waiting_for_login' && showPastePrompt && !urlCopied) {
-      void setClipboard(oauthStatus.url).then(raw => {
+    if (pastedCode === 'c' && safeOauthStatus.state === 'waiting_for_login' && showPastePrompt && !urlCopied) {
+      void setClipboard(safeOauthStatus.url).then(raw => {
         if (raw) process.stdout.write(raw);
         setUrlCopied(true);
         setTimeout(setUrlCopied, 2000, false);
       });
       setPastedCode('');
     }
-  }, [pastedCode, oauthStatus, showPastePrompt, urlCopied]);
+  }, [pastedCode, safeOauthStatus, showPastePrompt, urlCopied]);
   const persistCustomEndpoint = useCallback(() => {
     const nextBaseURL = customBaseURL.trim();
     const nextApiKey = customApiKey.trim();
@@ -213,10 +216,10 @@ export function ConsoleOAuthFlow({
     });
   }, [compatibleApiProvider, customApiKey, customBaseURL, customModel, persistedCustomApiEndpoint.savedModels]);
   const handleSubmitCustomConfig = useCallback((value: string) => {
-    if (oauthStatus.state !== 'custom_config') {
+    if (safeOauthStatus.state !== 'custom_config') {
       return;
     }
-    if (oauthStatus.step === 'baseURL') {
+    if (safeOauthStatus.step === 'baseURL') {
       const nextValue = value.trim();
       if (!nextValue) {
         setOAuthStatus({
@@ -224,7 +227,7 @@ export function ConsoleOAuthFlow({
           message: '兼容地址不能为空',
           toRetry: {
             state: 'custom_config',
-            provider: oauthStatus.provider,
+            provider: safeOauthStatus.provider,
             step: 'baseURL'
           }
         });
@@ -234,12 +237,12 @@ export function ConsoleOAuthFlow({
       setCursorOffset(0);
         setOAuthStatus({
           state: 'custom_config',
-          provider: oauthStatus.provider,
+          provider: safeOauthStatus.provider,
           step: 'apiKey'
         });
       return;
     }
-    if (oauthStatus.step === 'apiKey') {
+    if (safeOauthStatus.step === 'apiKey') {
       const nextValue = value.trim();
       if (!nextValue) {
         setOAuthStatus({
@@ -247,7 +250,7 @@ export function ConsoleOAuthFlow({
           message: 'API Key 不能为空',
           toRetry: {
             state: 'custom_config',
-            provider: oauthStatus.provider,
+            provider: safeOauthStatus.provider,
             step: 'apiKey'
           }
         });
@@ -257,7 +260,7 @@ export function ConsoleOAuthFlow({
       setCursorOffset(0);
         setOAuthStatus({
           state: 'custom_config',
-          provider: oauthStatus.provider,
+          provider: safeOauthStatus.provider,
           step: 'model'
         });
       return;
@@ -269,7 +272,7 @@ export function ConsoleOAuthFlow({
         message: '模型不能为空',
         toRetry: {
           state: 'custom_config',
-          provider: oauthStatus.provider,
+          provider: safeOauthStatus.provider,
           step: 'model'
         }
       });
@@ -281,10 +284,10 @@ export function ConsoleOAuthFlow({
       state: 'success'
     });
     void sendNotification({
-      message: oauthStatus.provider === 'openai' ? 'OpenAI-compatible endpoint saved' : 'Anthropic-compatible endpoint saved',
+      message: safeOauthStatus.provider === 'openai' ? 'OpenAI-compatible endpoint saved' : 'Anthropic-compatible endpoint saved',
       notificationType: 'auth_success'
     }, terminal);
-  }, [oauthStatus, persistCustomEndpoint, terminal]);
+  }, [safeOauthStatus, persistCustomEndpoint, terminal]);
   async function handleSubmitCode(value: string, url: string) {
     try {
       // Expecting format "authorizationCode#state" from the authorization callback URL
@@ -396,18 +399,18 @@ export function ConsoleOAuthFlow({
   }, [oauthService, setShowPastePrompt, loginWithClaudeAi, mode, orgUUID]);
   const pendingOAuthStartRef = useRef(false);
   useEffect(() => {
-    if (oauthStatus.state === 'ready_to_start' && !pendingOAuthStartRef.current) {
+    if (safeOauthStatus.state === 'ready_to_start' && !pendingOAuthStartRef.current) {
       pendingOAuthStartRef.current = true;
       process.nextTick((startOAuth_0: () => Promise<void>, pendingOAuthStartRef_0: React.MutableRefObject<boolean>) => {
         void startOAuth_0();
         pendingOAuthStartRef_0.current = false;
       }, startOAuth, pendingOAuthStartRef);
     }
-  }, [oauthStatus.state, startOAuth]);
+  }, [safeOauthStatus.state, startOAuth]);
 
   // Auto-exit for setup-token mode
   useEffect(() => {
-    if (mode === 'setup-token' && oauthStatus.state === 'success') {
+    if (mode === 'setup-token' && safeOauthStatus.state === 'success') {
       // Delay to ensure static content is fully rendered before exiting
       const timer_0 = setTimeout((loginWithClaudeAi_0, onDone_0) => {
         logEvent('tengu_oauth_success', {
@@ -418,7 +421,7 @@ export function ConsoleOAuthFlow({
       }, 500, loginWithClaudeAi, onDone);
       return () => clearTimeout(timer_0);
     }
-  }, [mode, oauthStatus, loginWithClaudeAi, onDone]);
+  }, [mode, safeOauthStatus, loginWithClaudeAi, onDone]);
 
   // Cleanup OAuth service when component unmounts
   useEffect(() => {
@@ -427,7 +430,7 @@ export function ConsoleOAuthFlow({
     };
   }, [oauthService]);
   return <Box flexDirection="column" gap={1}>
-      {oauthStatus.state === 'waiting_for_login' && showPastePrompt && <Box flexDirection="column" key="urlToCopy" gap={1} paddingBottom={1}>
+      {safeOauthStatus.state === 'waiting_for_login' && showPastePrompt && <Box flexDirection="column" key="urlToCopy" gap={1} paddingBottom={1}>
           <Box paddingX={1}>
             <Text dimColor>
               Browser didn&apos;t open? Use the url below to sign in{' '}
@@ -436,17 +439,17 @@ export function ConsoleOAuthFlow({
                 <KeyboardShortcutHint shortcut="c" action="copy" parens />
               </Text>}
           </Box>
-          <Link url={oauthStatus.url}>
-            <Text dimColor>{oauthStatus.url}</Text>
+          <Link url={safeOauthStatus.url}>
+            <Text dimColor>{safeOauthStatus.url}</Text>
           </Link>
         </Box>}
-      {mode === 'setup-token' && oauthStatus.state === 'success' && oauthStatus.token && <Box key="tokenOutput" flexDirection="column" gap={1} paddingTop={1}>
+      {mode === 'setup-token' && safeOauthStatus.state === 'success' && safeOauthStatus.token && <Box key="tokenOutput" flexDirection="column" gap={1} paddingTop={1}>
             <Text color="success">
               ✓ Long-lived authentication token created successfully!
             </Text>
             <Box flexDirection="column" gap={1}>
               <Text>Your OAuth token (valid for 1 year):</Text>
-              <Text color="warning">{oauthStatus.token}</Text>
+              <Text color="warning">{safeOauthStatus.token}</Text>
               <Text dimColor>
                 Store this token securely. You won&apos;t be able to see it
                 again.
@@ -458,7 +461,7 @@ export function ConsoleOAuthFlow({
             </Box>
           </Box>}
       <Box paddingLeft={1} flexDirection="column" gap={1}>
-        <OAuthStatusMessage oauthStatus={oauthStatus} mode={mode} startingMessage={startingMessage} forcedMethodMessage={forcedMethodMessage} showPastePrompt={showPastePrompt} pastedCode={pastedCode} setPastedCode={setPastedCode} cursorOffset={cursorOffset} setCursorOffset={setCursorOffset} textInputColumns={textInputColumns} handleSubmitCode={handleSubmitCode} setOAuthStatus={setOAuthStatus} setLoginWithClaudeAi={setLoginWithClaudeAi} customBaseURL={customBaseURL} customApiKey={customApiKey} customModel={customModel} setCustomBaseURL={setCustomBaseURL} setCustomApiKey={setCustomApiKey} setCustomModel={setCustomModel} isCustomInputPasting={isCustomInputPasting} setIsCustomInputPasting={setIsCustomInputPasting} handleSubmitCustomConfig={handleSubmitCustomConfig} startCompatibleApiConfig={startCompatibleApiConfig} compatibleApiProvider={compatibleApiProvider} />
+        <OAuthStatusMessage oauthStatus={safeOauthStatus} mode={mode} startingMessage={startingMessage} forcedMethodMessage={forcedMethodMessage} showPastePrompt={showPastePrompt} pastedCode={pastedCode} setPastedCode={setPastedCode} cursorOffset={cursorOffset} setCursorOffset={setCursorOffset} textInputColumns={textInputColumns} handleSubmitCode={handleSubmitCode} setOAuthStatus={setOAuthStatus} setLoginWithClaudeAi={setLoginWithClaudeAi} customBaseURL={customBaseURL} customApiKey={customApiKey} customModel={customModel} setCustomBaseURL={setCustomBaseURL} setCustomApiKey={setCustomApiKey} setCustomModel={setCustomModel} isCustomInputPasting={isCustomInputPasting} setIsCustomInputPasting={setIsCustomInputPasting} handleSubmitCustomConfig={handleSubmitCustomConfig} startCompatibleApiConfig={startCompatibleApiConfig} compatibleApiProvider={compatibleApiProvider} />
       </Box>
     </Box>;
 }
