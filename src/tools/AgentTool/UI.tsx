@@ -429,7 +429,8 @@ export function renderToolUseTag(input: Partial<{
   const tags: React.ReactNode[] = [];
   if (input.model) {
     const mainModel = getMainLoopModel();
-    const agentModel = parseUserSpecifiedModel(input.model);
+    const configuredCompatModel = process.env.ANTHROPIC_MODEL?.trim();
+    const agentModel = configuredCompatModel || parseUserSpecifiedModel(input.model);
     if (agentModel !== mainModel) {
       tags.push(<Box key="model" flexWrap="nowrap" marginLeft={1}>
           <Text dimColor>{agentModel}</Text>
